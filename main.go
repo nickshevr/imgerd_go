@@ -3,13 +3,13 @@ package main
 import (
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
-	_ "github.com/lib/pq"
 	"log"
 	"net/http"
 	"github.com/ant0ine/go-json-rest/rest"
 	"strconv"
 	"regexp"
 	"time"
+	_ "github.com/lib/pq"
 )
 
 type Player struct {
@@ -41,8 +41,7 @@ type TournamentParticipant struct {
 	UpdatedAt time.Time
 	PlayerId uint `json:"playerId"`
 	TournamentId uint `json:"tournamentId"`
-	//@TODO переделать, т.к. в GORM не поддерживаются столбцы - массивы (вынести в таблицу)
-	//BackerIds []uint `json:"backerIds"`
+	BackerIds []uint `gorm:"type:int[]" json:"backerIds"`
 }
 
 func main() {
@@ -219,7 +218,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 	mainPlayer := Player{}
 	tournament := Tournament{}
 	backers := []Player{}
-	//isAlreadyPlayer := TournamentParticipant{}
+	isAlreadyPlayer := TournamentParticipant{}
 
 	if i.DB.First(&tournament, tournamentId).Error != nil {
 		rest.Error(w, "Tournament not found", 404)
@@ -231,12 +230,12 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		return
 	}
 
-/*	i.DB.Where("PlayerId = ?", playerId).Where("TournamentID = ?", tournamentId).First(&isAlreadyPlayer)
+	i.DB.Where("PlayerId = ?", playerId).Where("TournamentID = ?", tournamentId).First(&isAlreadyPlayer)
 
-	if (isAlreadyPlayer) {
+	if (isAlreadyPlayer.ID == playerId) {
 		rest.Error(w, "You are already take participant in this tournament", 406)
 		return
-	}*/
+	}
 
 	if (len(backerIds) > 0) {
 		i.DB.Where("ID in (?)", backerIds).Find(&backers)
@@ -252,7 +251,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 	}
 
 	if (mainPlayer.CurrentBalance - tournament.Deposit < 0) {
-		rest.Error(w, "Not enouth player money", 406)
+		rest.Error(w, "Not enougth player money", 406)
 		return
 	}
 
