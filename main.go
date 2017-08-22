@@ -58,7 +58,7 @@ func main() {
 		rest.Get("/balance", i.PlayerBalance),
 		rest.Get("/announceTournament", i.AnnounceTournament),
 		rest.Get("/joinTournament", i.JoinTournament),
-		rest.Get("/resultTournament", i.ResultTournament),
+		rest.Post("/resultTournament", i.ResultTournament),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -99,7 +99,7 @@ func (i *Impl) InitDB() {
 	var err error
 	//TODO Переназвать таблицы по-нормальному
 	/*gorm.DefaultTableNameHandler = func (db *gorm.DB, defaultTableName string) string  {
-		return "prefix_" + defaultTableName;
+		return "prefix_" + defaultTableName
 	}*/
 
 	i.DB, err = gorm.Open("postgres", "host=localhost user=test dbname=gostyle sslmode=disable password=test")
@@ -115,21 +115,21 @@ func (i *Impl) PlayerFund(w rest.ResponseWriter, r *rest.Request) {
 		log.Fatal(err)
 	}
 
-	id := ParseLeadingInt(r.Form.Get("playerId"));
-	points := ParseLeadingInt(r.Form.Get("points"));
+	id := ParseLeadingInt(r.Form.Get("playerId"))
+	points := ParseLeadingInt(r.Form.Get("points"))
 
 	player := Player{}
 
 	if i.DB.First(&player, id).Error != nil {
-		playerIn := Player{ID: id , CurrentBalance: points};
-		i.DB.Create(playerIn);
-		i.DB.Save(&playerIn);
-		w.WriteJson(playerIn);
+		playerIn := Player{ID: id , CurrentBalance: points}
+		i.DB.Create(playerIn)
+		i.DB.Save(&playerIn)
+		w.WriteJson(playerIn)
 
 		return
 	}
 
-	player.CurrentBalance += points;
+	player.CurrentBalance += points
 	i.DB.Save(&player)
 	w.WriteJson(player)
 }
@@ -141,8 +141,8 @@ func (i *Impl) PlayerTake(w rest.ResponseWriter, r *rest.Request) {
 		log.Fatal(err)
 	}
 
-	id := ParseLeadingInt(r.Form.Get("playerId"));
-	points := ParseLeadingInt(r.Form.Get("points"));
+	id := ParseLeadingInt(r.Form.Get("playerId"))
+	points := ParseLeadingInt(r.Form.Get("points"))
 
 	player := Player{}
 
@@ -156,7 +156,7 @@ func (i *Impl) PlayerTake(w rest.ResponseWriter, r *rest.Request) {
 		return
 	}
 
-	player.CurrentBalance -= points;
+	player.CurrentBalance -= points
 	i.DB.Save(&player)
 	w.WriteJson(&player)
 }
@@ -168,7 +168,7 @@ func (i *Impl) PlayerBalance(w rest.ResponseWriter, r *rest.Request) {
 		log.Fatal(err)
 	}
 
-	id := ParseLeadingInt(r.Form.Get("playerId"));
+	id := ParseLeadingInt(r.Form.Get("playerId"))
 	player := Player{}
 
 	if i.DB.First(&player, id).Error != nil {
@@ -176,7 +176,8 @@ func (i *Impl) PlayerBalance(w rest.ResponseWriter, r *rest.Request) {
 		return
 	}
 
-	w.WriteJson(&player)}
+	w.WriteJson(&player)
+}
 
 func (i *Impl) ResetDB(w rest.ResponseWriter, r *rest.Request) {
 	i.DB.DropTableIfExists(&Player{}, &Balance{}, &Tournament{}, &TournamentParticipant{})
@@ -191,8 +192,8 @@ func (i *Impl) AnnounceTournament(w rest.ResponseWriter, r *rest.Request) {
 		log.Fatal(err)
 	}
 
-	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"));
-	deposit := ParseLeadingInt(r.Form.Get("deposit"));
+	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"))
+	deposit := ParseLeadingInt(r.Form.Get("deposit"))
 
 	tournament := Tournament{ID: tournamentId, Deposit: deposit, Status: "opened"}
 
@@ -211,9 +212,10 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		log.Fatal(err)
 	}
 
-	playerId := ParseLeadingInt(r.Form.Get("playerId"));
-	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"));
-	backerIds := r.Form.Get("backerIds");
+	playerId := ParseLeadingInt(r.Form.Get("playerId"))
+	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"))
+	//@TODO запарсить из query в массив
+	backerIds := r.Form.Get("backerIds")
 
 	mainPlayer := Player{}
 	tournament := Tournament{}
@@ -230,42 +232,113 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		return
 	}
 
-	i.DB.Where("PlayerId = ?", playerId).Where("TournamentID = ?", tournamentId).First(&isAlreadyPlayer)
+	i.DB.Where("player_id = ?", playerId).Where("tournament_id = ?", tournamentId).First(&isAlreadyPlayer)
 
-	if (isAlreadyPlayer.ID == playerId) {
+	if isAlreadyPlayer.ID == playerId {
 		rest.Error(w, "You are already take participant in this tournament", 406)
 		return
 	}
 
-	if (len(backerIds) > 0) {
+	//@TODO переписать участок ниже без лишней копипасты
+	if len(backerIds) > 0 {
 		i.DB.Where("ID in (?)", backerIds).Find(&backers)
 
-		if (len(backerIds) > len(backers)) {
-			rest.NotFound(w, r)
+		if len(backerIds) > len(backers) {
+			rest.Error(w, "Backer not found", 404)
 			return
 		}
 
-		//neededAmount := tournament.Deposit / (len(backerIds) + 1);
+		//@TODO прочитать в доке Go про такое деление
+		playersCount := uint(len(backerIds) + 1)
+		neededAmount := tournament.Deposit / playersCount
+
+		if mainPlayer.CurrentBalance - neededAmount < 0 {
+			rest.Error(w, "Not enought player money", 406)
+			return
+		}
+
+		for _, backer := range backers {
+			if backer.CurrentBalance - neededAmount < 0 {
+				rest.Error(w, "Not enought backer money", 406)
+				return
+			}
+		}
+
+		mainPlayer.CurrentBalance -= neededAmount
+		i.DB.Save(&mainPlayer)
+
+		//@TODO цикл, конечно, отстой, можно 1 запросом
+		for _, backer := range backers {
+			backer.CurrentBalance -= neededAmount
+			i.DB.Save(&backer)
+		}
+
+		tournamentParticipant := TournamentParticipant{
+			PlayerId: mainPlayer.ID,
+			TournamentId: tournament.ID,
+			//BackerIds: []uint(backerIds)}
+			BackerIds: []uint{}}
+
+		i.DB.Save(&tournamentParticipant)
 
 		return
 	}
 
-	if (mainPlayer.CurrentBalance - tournament.Deposit < 0) {
+	if mainPlayer.CurrentBalance - tournament.Deposit < 0 {
 		rest.Error(w, "Not enougth player money", 406)
 		return
 	}
 
-	mainPlayer.CurrentBalance -= tournament.Deposit;
+	mainPlayer.CurrentBalance -= tournament.Deposit
 
 	tournamentParticipant := TournamentParticipant{
 		PlayerId: mainPlayer.ID,
-		TournamentId: tournament.ID};
+		TournamentId: tournament.ID,
+		BackerIds: []uint{}}
 
-	i.DB.Save(&tournamentParticipant);
+	i.DB.Save(&tournamentParticipant)
 	i.DB.Save(&mainPlayer)
 	w.WriteJson(&tournamentParticipant)
 }
 
+type Winners struct {
+	PlayerId uint `json:"playerId"`
+	Prize uint `json:"prize"`
+}
+
+type ResultJson struct {
+	TournamentId uint `json:"tournamentId"`
+	Winners []Winners `json:"winners"`
+
+}
 func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
-	rest.NotFound(w, r)
+	input := ResultJson{}
+	tournament := Tournament{}
+
+	if err := r.DecodeJsonPayload(&input); err != nil {
+		rest.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if i.DB.First(&tournament, input.TournamentId).Error != nil {
+		rest.Error(w, "Tournament not found", 404)
+		return
+	}
+
+	tournament.Status = "closed"
+	i.DB.Save(&tournament)
+
+	for _, winner := range input.Winners {
+		tournamentParticipant := TournamentParticipant{}
+		if i.DB.Where("tournament_id = ?", input.TournamentId).
+			Where("player_id = ?", winner.PlayerId).
+			First(&tournamentParticipant).Error != nil {
+				rest.Error(w, "TournamentParticipant not found", 404)
+				return
+		}
+
+		//Раздать всем баланс, не хочется опять в цикле, написать потом функцию
+	}
+
+	w.WriteJson(&input)
 }
