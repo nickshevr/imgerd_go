@@ -18,7 +18,7 @@ type Player struct {
 	UpdatedAt time.Time
 	CurrentBalance uint `json:"currentBalance"`
 }
-
+//@TODO использовать как историю изменений баланса
 type Balance struct {
 	ID        uint `gorm:"primary_key"`
 	CreatedAt time.Time
@@ -122,16 +122,15 @@ func (i *Impl) PlayerFund(w rest.ResponseWriter, r *rest.Request) {
 
 	if i.DB.First(&player, id).Error != nil {
 		playerIn := Player{ID: id , CurrentBalance: points}
-		i.DB.Create(playerIn)
-		i.DB.Save(&playerIn)
-		w.WriteJson(playerIn)
+		i.DB.Create(&playerIn)
+		w.WriteJson(&playerIn)
 
 		return
 	}
 
 	player.CurrentBalance += points
 	i.DB.Save(&player)
-	w.WriteJson(player)
+	w.WriteJson(&player)
 }
 
 func (i *Impl) PlayerTake(w rest.ResponseWriter, r *rest.Request) {
@@ -152,7 +151,7 @@ func (i *Impl) PlayerTake(w rest.ResponseWriter, r *rest.Request) {
 	}
 
 	if player.CurrentBalance - points <= 0 {
-		rest.Error(w, "Unlucky boys", 403)
+		rest.Error(w, "Player balance must be gte 0", http.StatusNotAcceptable)
 		return
 	}
 
@@ -198,7 +197,7 @@ func (i *Impl) AnnounceTournament(w rest.ResponseWriter, r *rest.Request) {
 	tournament := Tournament{ID: tournamentId, Deposit: deposit, Status: "opened"}
 
 	if i.DB.Create(&tournament).Error != nil {
-		rest.Error(w, "Already opened", 403)
+		rest.Error(w, "Already opened", http.StatusNotAcceptable)
 		return
 	}
 
@@ -223,19 +222,19 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 	isAlreadyPlayer := TournamentParticipant{}
 
 	if i.DB.First(&tournament, tournamentId).Error != nil {
-		rest.Error(w, "Tournament not found", 404)
+		rest.Error(w, "Tournament not found", http.StatusNotFound)
 		return
 	}
 
 	if i.DB.First(&mainPlayer, playerId).Error != nil {
-		rest.Error(w, "Player not found", 404)
+		rest.Error(w, "Player not found", http.StatusNotFound)
 		return
 	}
 
 	i.DB.Where("player_id = ?", playerId).Where("tournament_id = ?", tournamentId).First(&isAlreadyPlayer)
 
 	if isAlreadyPlayer.ID == playerId {
-		rest.Error(w, "You are already take participant in this tournament", 406)
+		rest.Error(w, "You are already take participant in this tournament", http.StatusNotAcceptable)
 		return
 	}
 
@@ -244,7 +243,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		i.DB.Where("ID in (?)", backerIds).Find(&backers)
 
 		if len(backerIds) > len(backers) {
-			rest.Error(w, "Backer not found", 404)
+			rest.Error(w, "Backer not found", http.StatusNotFound)
 			return
 		}
 
@@ -253,13 +252,13 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		neededAmount := tournament.Deposit / playersCount
 
 		if mainPlayer.CurrentBalance - neededAmount < 0 {
-			rest.Error(w, "Not enought player money", 406)
+			rest.Error(w, "Not enought player money", http.StatusNotAcceptable)
 			return
 		}
 
 		for _, backer := range backers {
 			if backer.CurrentBalance - neededAmount < 0 {
-				rest.Error(w, "Not enought backer money", 406)
+				rest.Error(w, "Not enought backer money", http.StatusNotAcceptable)
 				return
 			}
 		}
@@ -285,7 +284,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 	}
 
 	if mainPlayer.CurrentBalance - tournament.Deposit < 0 {
-		rest.Error(w, "Not enougth player money", 406)
+		rest.Error(w, "Not enougth player money", http.StatusNotAcceptable)
 		return
 	}
 
@@ -316,12 +315,12 @@ func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 	tournament := Tournament{}
 
 	if err := r.DecodeJsonPayload(&input); err != nil {
-		rest.Error(w, err.Error(), http.StatusInternalServerError)
+		rest.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if i.DB.First(&tournament, input.TournamentId).Error != nil {
-		rest.Error(w, "Tournament not found", 404)
+		rest.Error(w, "Tournament not found", http.StatusNotFound)
 		return
 	}
 
@@ -333,7 +332,7 @@ func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 		if i.DB.Where("tournament_id = ?", input.TournamentId).
 			Where("player_id = ?", winner.PlayerId).
 			First(&tournamentParticipant).Error != nil {
-				rest.Error(w, "TournamentParticipant not found", 404)
+				rest.Error(w, "TournamentParticipant not found", http.StatusNotFound)
 				return
 		}
 
