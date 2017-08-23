@@ -221,8 +221,12 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 
 	playerId := ParseLeadingInt(r.Form.Get("playerId"))
 	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"))
-	//@TODO запарсить из query в массив
-	backerIds := r.Form.Get("backerIds")
+	backerIdsQuery := r.Form["backerIds"]
+	backerIds := make([]uint, len(backerIdsQuery))
+
+	for i, _ := range backerIdsQuery {
+		backerIds[i] = ParseLeadingInt(backerIdsQuery[i])
+	}
 
 	mainPlayer := Player{}
 	tournament := Tournament{}
@@ -260,7 +264,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 			return
 		}
 
-		playersCount := uint(len(backerIds) + 1)
+		playersCount := len(backerIds) + 1
 		neededAmount := uint(math.Ceil(float64(tournament.Deposit) / float64(playersCount)))
 
 		if mainPlayer.CurrentBalance - neededAmount < 0 {
@@ -278,21 +282,15 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		mainPlayer.CurrentBalance -= neededAmount
 		i.DB.Save(&mainPlayer)
 
-		//i.UpdatePlayersBalances(backerIds, neededAmount);
-
-		//@TODO цикл, конечно, отстой, можно 1 запросом
-		for _, backer := range backers {
-			backer.CurrentBalance -= neededAmount
-			i.DB.Save(&backer)
-		}
+		i.UpdatePlayersBalances(backerIds, -int(neededAmount));
 
 		tournamentParticipant := TournamentParticipant{
 			PlayerId: mainPlayer.ID,
 			TournamentId: tournament.ID,
-			//BackerIds: []uint(backerIds)}
-			BackerIds: []uint{}}
+			BackerIds: backerIds}
 
 		i.DB.Save(&tournamentParticipant)
+		w.WriteJson(&tournamentParticipant)
 
 		return
 	}
@@ -324,7 +322,6 @@ type ResultJson struct {
 	Winners []Winners `json:"winners"`
 
 }
-
 
 func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 	input := ResultJson{}
