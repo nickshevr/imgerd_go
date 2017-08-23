@@ -8,42 +8,10 @@ import (
 	"github.com/ant0ine/go-json-rest/rest"
 	"strconv"
 	"regexp"
-	"time"
 	_ "github.com/lib/pq"
 	"math"
+	"./models"
 )
-
-type Player struct {
-	ID        uint `gorm:"primary_key"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	CurrentBalance uint `json:"currentBalance"`
-}
-//@TODO использовать как историю изменений баланса
-type Balance struct {
-	ID        uint `gorm:"primary_key"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Amount int `json:"amount"`
-	Reason string `json:"reason"`
-}
-
-type Tournament struct {
-	ID        uint `gorm:"primary_key"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Status string `json:"status"`
-	Deposit uint `json:"deposit"`
-}
-
-type TournamentParticipant struct {
-	ID        uint `gorm:"primary_key"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	PlayerId uint `json:"playerId"`
-	TournamentId uint `json:"tournamentId"`
-	BackerIds []uint `gorm:"type:int[]" json:"backerIds"`
-}
 
 func main() {
 	i := Impl{}
@@ -90,15 +58,15 @@ func ParseLeadingInt(s string) (uint) {
 }
 
 func (i *Impl) InitSchemas() {
-	i.DB.AutoMigrate(&Player{})
-	i.DB.AutoMigrate(&Balance{})
-	i.DB.AutoMigrate(&TournamentParticipant{})
-	i.DB.AutoMigrate(&Tournament{})
+	i.DB.AutoMigrate(&models.Player{})
+	i.DB.AutoMigrate(&models.Balance{})
+	i.DB.AutoMigrate(&models.TournamentParticipant{})
+	i.DB.AutoMigrate(&models.Tournament{})
 }
 
 func (i *Impl) UpdatePlayersBalances(playerIds []uint, difference int) {
 	//@TODO проверять на ошибку
-	i.DB.Model(&Player{}).
+	i.DB.Model(&models.Player{}).
 		Where("id in (?)", playerIds).
 		Update("current_balance", gorm.Expr("current_balance + ?", difference))
 }
@@ -126,10 +94,10 @@ func (i *Impl) PlayerFund(w rest.ResponseWriter, r *rest.Request) {
 	id := ParseLeadingInt(r.Form.Get("playerId"))
 	points := ParseLeadingInt(r.Form.Get("points"))
 
-	player := Player{}
+	player := models.Player{}
 
 	if i.DB.First(&player, id).Error != nil {
-		playerIn := Player{ID: id , CurrentBalance: points}
+		playerIn := models.Player{ID: id , CurrentBalance: points}
 		i.DB.Create(&playerIn)
 		w.WriteJson(&playerIn)
 
@@ -151,7 +119,7 @@ func (i *Impl) PlayerTake(w rest.ResponseWriter, r *rest.Request) {
 	id := ParseLeadingInt(r.Form.Get("playerId"))
 	points := ParseLeadingInt(r.Form.Get("points"))
 
-	player := Player{}
+	player := models.Player{}
 
 	if i.DB.First(&player, id).Error != nil {
 		rest.NotFound(w, r)
@@ -176,7 +144,7 @@ func (i *Impl) PlayerBalance(w rest.ResponseWriter, r *rest.Request) {
 	}
 
 	id := ParseLeadingInt(r.Form.Get("playerId"))
-	player := Player{}
+	player := models.Player{}
 
 	if i.DB.First(&player, id).Error != nil {
 		rest.NotFound(w, r)
@@ -187,7 +155,7 @@ func (i *Impl) PlayerBalance(w rest.ResponseWriter, r *rest.Request) {
 }
 
 func (i *Impl) ResetDB(w rest.ResponseWriter, r *rest.Request) {
-	i.DB.DropTableIfExists(&Player{}, &Balance{}, &Tournament{}, &TournamentParticipant{})
+	i.DB.DropTableIfExists(&models.Player{}, &models.Balance{}, &models.Tournament{}, &models.TournamentParticipant{})
 	i.InitSchemas()
 	w.WriteJson("Tables dropped")
 }
@@ -202,7 +170,7 @@ func (i *Impl) AnnounceTournament(w rest.ResponseWriter, r *rest.Request) {
 	tournamentId := ParseLeadingInt(r.Form.Get("tournamentId"))
 	deposit := ParseLeadingInt(r.Form.Get("deposit"))
 
-	tournament := Tournament{ID: tournamentId, Deposit: deposit, Status: "opened"}
+	tournament := models.Tournament{ID: tournamentId, Deposit: deposit, Status: "opened"}
 
 	if i.DB.Create(&tournament).Error != nil {
 		rest.Error(w, "Already opened", http.StatusNotAcceptable)
@@ -228,10 +196,10 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		backerIds[i] = ParseLeadingInt(backerIdsQuery[i])
 	}
 
-	mainPlayer := Player{}
-	tournament := Tournament{}
-	backers := []Player{}
-	isAlreadyPlayer := TournamentParticipant{}
+	mainPlayer := models.Player{}
+	tournament := models.Tournament{}
+	backers := []models.Player{}
+	isAlreadyPlayer := models.TournamentParticipant{}
 
 	if i.DB.First(&tournament, tournamentId).Error != nil {
 		rest.Error(w, "Tournament not found", http.StatusNotFound)
@@ -284,7 +252,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 
 		i.UpdatePlayersBalances(backerIds, -int(neededAmount));
 
-		tournamentParticipant := TournamentParticipant{
+		tournamentParticipant := models.TournamentParticipant{
 			PlayerId: mainPlayer.ID,
 			TournamentId: tournament.ID,
 			BackerIds: backerIds}
@@ -302,7 +270,7 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 
 	mainPlayer.CurrentBalance -= tournament.Deposit
 
-	tournamentParticipant := TournamentParticipant{
+	tournamentParticipant := models.TournamentParticipant{
 		PlayerId: mainPlayer.ID,
 		TournamentId: tournament.ID,
 		BackerIds: []uint{}}
@@ -325,7 +293,7 @@ type ResultJson struct {
 
 func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 	input := ResultJson{}
-	tournament := Tournament{}
+	tournament := models.Tournament{}
 
 	if err := r.DecodeJsonPayload(&input); err != nil {
 		rest.Error(w, err.Error(), http.StatusBadRequest)
@@ -341,7 +309,7 @@ func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 	i.DB.Save(&tournament)
 
 	for _, winner := range input.Winners {
-		tournamentParticipant := TournamentParticipant{}
+		tournamentParticipant := models.TournamentParticipant{}
 
 		if i.DB.Where("tournament_id = ?", input.TournamentId).
 			Where("player_id = ?", winner.PlayerId).
