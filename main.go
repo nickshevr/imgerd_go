@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 	_ "github.com/lib/pq"
+	"math"
 )
 
 type Player struct {
@@ -93,6 +94,13 @@ func (i *Impl) InitSchemas() {
 	i.DB.AutoMigrate(&Balance{})
 	i.DB.AutoMigrate(&TournamentParticipant{})
 	i.DB.AutoMigrate(&Tournament{})
+}
+
+func (i *Impl) UpdatePlayersBalances(playerIds []uint, difference int) {
+	//@TODO проверять на ошибку
+	i.DB.Model(&Player{}).
+		Where("id in (?)", playerIds).
+		Update("current_balance", gorm.Expr("current_balance + ?", difference))
 }
 
 func (i *Impl) InitDB() {
@@ -231,6 +239,11 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 		return
 	}
 
+	if tournament.Status != "opened" {
+		rest.Error(w, "Tournament isnt opened", http.StatusNotAcceptable)
+		return
+	}
+
 	i.DB.Where("player_id = ?", playerId).Where("tournament_id = ?", tournamentId).First(&isAlreadyPlayer)
 
 	if isAlreadyPlayer.ID == playerId {
@@ -240,16 +253,15 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 
 	//@TODO переписать участок ниже без лишней копипасты
 	if len(backerIds) > 0 {
-		i.DB.Where("ID in (?)", backerIds).Find(&backers)
+		i.DB.Where("id in (?)", backerIds).Find(&backers)
 
 		if len(backerIds) > len(backers) {
 			rest.Error(w, "Backer not found", http.StatusNotFound)
 			return
 		}
 
-		//@TODO прочитать в доке Go про такое деление
 		playersCount := uint(len(backerIds) + 1)
-		neededAmount := tournament.Deposit / playersCount
+		neededAmount := uint(math.Ceil(float64(tournament.Deposit) / float64(playersCount)))
 
 		if mainPlayer.CurrentBalance - neededAmount < 0 {
 			rest.Error(w, "Not enought player money", http.StatusNotAcceptable)
@@ -265,6 +277,8 @@ func (i *Impl) JoinTournament(w rest.ResponseWriter, r *rest.Request) {
 
 		mainPlayer.CurrentBalance -= neededAmount
 		i.DB.Save(&mainPlayer)
+
+		//i.UpdatePlayersBalances(backerIds, neededAmount);
 
 		//@TODO цикл, конечно, отстой, можно 1 запросом
 		for _, backer := range backers {
@@ -310,6 +324,8 @@ type ResultJson struct {
 	Winners []Winners `json:"winners"`
 
 }
+
+
 func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 	input := ResultJson{}
 	tournament := Tournament{}
@@ -329,6 +345,7 @@ func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 
 	for _, winner := range input.Winners {
 		tournamentParticipant := TournamentParticipant{}
+
 		if i.DB.Where("tournament_id = ?", input.TournamentId).
 			Where("player_id = ?", winner.PlayerId).
 			First(&tournamentParticipant).Error != nil {
@@ -336,8 +353,9 @@ func (i *Impl) ResultTournament(w rest.ResponseWriter, r *rest.Request) {
 				return
 		}
 
-		//Раздать всем баланс, не хочется опять в цикле, написать потом функцию
+		prize := int(math.Floor(float64(winner.Prize) / float64(len(tournamentParticipant.BackerIds) + 1)))
+		i.UpdatePlayersBalances(append(tournamentParticipant.BackerIds, winner.PlayerId), prize)
 	}
 
-	w.WriteJson(&input)
+	w.WriteJson(http.StatusOK)
 }
