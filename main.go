@@ -8,7 +8,6 @@ import (
 	"github.com/ant0ine/go-json-rest/rest"
 	"strconv"
 	"regexp"
-	_ "github.com/lib/pq"
 	"math"
 	"./models"
 )
